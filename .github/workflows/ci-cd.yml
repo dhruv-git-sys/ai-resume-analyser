@@ -12,36 +12,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Log in to Docker (optional)
-        if: ${{ secrets.DOCKERHUB_USERNAME }}
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build Docker image
+      - name: Prepare repo archive
         run: |
-          IMAGE_NAME=ai-resume-analyser
-          TAG=latest
-          docker build -t ${IMAGE_NAME}:${TAG} .
-
-      - name: Save image to tar
-        run: |
-          IMAGE_NAME=ai-resume-analyser
-          TAG=latest
-          docker save ${IMAGE_NAME}:${TAG} -o image.tar
+          # create a tarball of the repository without the .git folder
+          TARFILE=repo.tar.gz
+          git rev-parse --verify HEAD
+          git archive -o ${TARFILE} HEAD
 
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y openssh-client
 
-      - name: Copy image to EC2
+      - name: Copy repo archive to EC2
         env:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -50,9 +31,10 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          scp -o StrictHostKeyChecking=no -P ${EC2_SSH_PORT} image.tar ${EC2_USER}@${EC2_HOST}:~/image.tar
+          TARFILE=repo.tar.gz
+          scp -o StrictHostKeyChecking=no -P ${EC2_SSH_PORT} ${TARFILE} ${EC2_USER}@${EC2_HOST}:~/repo.tar.gz
 
-      - name: Deploy on EC2 (load image & run)
+      - name: Build & run on EC2
         env:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -62,20 +44,38 @@ jobs:
         run: |
           chmod 600 ~/.ssh/deploy_key
           ssh -o StrictHostKeyChecking=no -p ${EC2_SSH_PORT} -i ~/.ssh/deploy_key ${EC2_USER}@${EC2_HOST} << 'EOF'
-            # stop and remove any existing container
+            set -e
+            echo "Deploy started on $(hostname)"
+            # ensure docker is installed
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "Docker not found, installing..."
+              sudo apt-get update
+              sudo apt-get install -y docker.io
+              sudo systemctl enable --now docker
+            fi
+
+            # prepare workspace
+            rm -rf ~/deploy_workspace || true
+            mkdir -p ~/deploy_workspace
+            tar -xzf ~/repo.tar.gz -C ~/deploy_workspace
+            cd ~/deploy_workspace
+
+            # build image on EC2
+            IMAGE_NAME=ai-resume-analyser
+            docker build -t ${IMAGE_NAME}:latest .
+
+            # stop and remove existing container
             docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
             docker ps -a -q --filter "name=${CONTAINER_NAME}" | xargs -r docker rm || true
 
-            # load new image
-            docker load -i ~/image.tar || exit 1
-
-            # run the container (replace port if needed)
-            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} ai-resume-analyser:latest
+            # run the container
+            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} ${IMAGE_NAME}:latest
+            echo "Deploy finished"
           EOF
 
       - name: Cleanup
         run: |
-          rm -f image.tar
+          rm -f repo.tar.gz
 
 # Required repository secrets:
 # - EC2_USER: username on the EC2 instance (e.g., ubuntu)
