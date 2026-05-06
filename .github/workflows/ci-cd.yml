@@ -1,0 +1,86 @@
+name: CI/CD Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker (optional)
+        if: ${{ secrets.DOCKERHUB_USERNAME }}
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          IMAGE_NAME=ai-resume-analyser
+          TAG=latest
+          docker build -t ${IMAGE_NAME}:${TAG} .
+
+      - name: Save image to tar
+        run: |
+          IMAGE_NAME=ai-resume-analyser
+          TAG=latest
+          docker save ${IMAGE_NAME}:${TAG} -o image.tar
+
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y openssh-client
+
+      - name: Copy image to EC2
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -o StrictHostKeyChecking=no -P ${EC2_SSH_PORT} image.tar ${EC2_USER}@${EC2_HOST}:~/image.tar
+
+      - name: Deploy on EC2 (load image & run)
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+          CONTAINER_NAME: ai-resume
+          PORT: 3000
+        run: |
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no -p ${EC2_SSH_PORT} -i ~/.ssh/deploy_key ${EC2_USER}@${EC2_HOST} << 'EOF'
+            # stop and remove any existing container
+            docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
+            docker ps -a -q --filter "name=${CONTAINER_NAME}" | xargs -r docker rm || true
+
+            # load new image
+            docker load -i ~/image.tar || exit 1
+
+            # run the container (replace port if needed)
+            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} ai-resume-analyser:latest
+          EOF
+
+      - name: Cleanup
+        run: |
+          rm -f image.tar
+
+# Required repository secrets:
+# - EC2_USER: username on the EC2 instance (e.g., ubuntu)
+# - EC2_HOST: public IP or DNS of the EC2 instance
+# - EC2_SSH_PORT: SSH port (default 22)
+# - EC2_SSH_PRIVATE_KEY: the private SSH key (PEM) with access to EC2_USER on EC2_HOST
+# Optional (if you want to push images to Docker Hub):
+# - DOCKERHUB_USERNAME
+# - DOCKERHUB_TOKEN
