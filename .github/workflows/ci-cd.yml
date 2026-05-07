@@ -46,7 +46,7 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
           CONTAINER_NAME: ai-resume
-          PORT: 3000
+          PORT: 80
         run: |
           chmod 600 ~/.ssh/deploy_key
           ssh -o StrictHostKeyChecking=no -p ${EC2_SSH_PORT} -i ~/.ssh/deploy_key ${EC2_USER}@${EC2_HOST} << EOF
@@ -74,8 +74,8 @@ jobs:
             docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
             docker ps -a -q --filter "name=${CONTAINER_NAME}" | xargs -r docker rm || true
 
-            # run the container
-            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} \${IMAGE_NAME}:latest
+            # run the container (publish host port 80 -> container PORT)
+            docker run -d --name ${CONTAINER_NAME} -p 80:${PORT} -e PORT=${PORT} \${IMAGE_NAME}:latest
             echo "Deploy finished"
           EOF
 
