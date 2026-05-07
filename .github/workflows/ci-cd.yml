@@ -68,14 +68,14 @@ jobs:
 
             # build image on EC2
             IMAGE_NAME=ai-resume-analyser
-            docker build -t ${IMAGE_NAME}:latest .
+            docker build -t \${IMAGE_NAME}:latest .
 
             # stop and remove existing container
             docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
             docker ps -a -q --filter "name=${CONTAINER_NAME}" | xargs -r docker rm || true
 
             # run the container
-            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} ${IMAGE_NAME}:latest
+            docker run -d --name ${CONTAINER_NAME} -p ${PORT}:${PORT} -e PORT=${PORT} \${IMAGE_NAME}:latest
             echo "Deploy finished"
           EOF
 
