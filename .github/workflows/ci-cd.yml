@@ -60,6 +60,21 @@ jobs:
               sudo systemctl enable --now docker
             fi
 
+            # CLEANUP: free disk space and prune docker artifacts to avoid ENOSPC
+            echo "Running cleanup to free disk space before build"
+            # prune stopped containers, unused images, volumes and builder cache
+            sudo docker container prune -f || true
+            sudo docker image prune -af || true
+            sudo docker volume prune -f || true
+            sudo docker builder prune -af || true
+            # remove apt caches and tmp files
+            sudo rm -rf /var/cache/apt/archives/* || true
+            sudo rm -rf /var/lib/apt/lists/* || true
+            sudo apt-get clean || true
+            sudo rm -rf /tmp/* || true
+            sudo rm -rf /var/lib/docker/tmp/* || true
+            echo "Disk usage after cleanup:" && df -h || true
+
             # prepare workspace
             rm -rf ~/deploy_workspace || true
             mkdir -p ~/deploy_workspace
@@ -68,7 +83,7 @@ jobs:
 
             # build image on EC2
             IMAGE_NAME=ai-resume-analyser
-            docker build -t \${IMAGE_NAME}:latest .
+            docker build -t ${IMAGE_NAME}:latest .
 
             # stop and remove existing container
             docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
