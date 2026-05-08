@@ -90,7 +90,7 @@ jobs:
             docker ps -a -q --filter "name=${CONTAINER_NAME}" | xargs -r docker rm || true
 
             # run the container (publish host port 80 -> container PORT)
-            docker run -d --name ${CONTAINER_NAME} -p 80:${PORT} -e PORT=${PORT} \${IMAGE_NAME}:latest
+            docker run -d --name ${CONTAINER_NAME} -p 80:${PORT} -e PORT=${PORT} ${IMAGE_NAME}:latest
             echo "Deploy finished"
           EOF
 
