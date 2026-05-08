@@ -78,12 +78,16 @@ jobs:
             # prepare workspace
             rm -rf ~/deploy_workspace || true
             mkdir -p ~/deploy_workspace
-            tar -xzf ~/repo.tar.gz -C ~/deploy_workspace
+            echo "Extracting repo archive..."
+            tar -xzf ~/repo.tar.gz -C ~/deploy_workspace || { echo "TAR FAILED"; exit 1; }
             cd ~/deploy_workspace
+            ls -la
+            test -f Dockerfile || { echo "Dockerfile not found!"; exit 1; }
 
             # build image on EC2
-            IMAGE_NAME=ai-resume-analyser
-            docker build -t ${IMAGE_NAME}:latest .
+            export IMAGE_NAME="ai-resume-analyser"
+            echo "Building Docker image: ${IMAGE_NAME}:latest"
+            docker build -t ${IMAGE_NAME}:latest . || { echo "Docker build failed"; exit 1; }
 
             # stop and remove existing container
             docker ps -q --filter "name=${CONTAINER_NAME}" | xargs -r docker stop || true
